@@ -1,13 +1,23 @@
-![ProsperoLight icon](sce_sys/icon0.png)
+<p align="center">
+  <img src="sce_sys/icon0.png" width="128" alt="ProsperoLight icon">
+</p>
 
-# ProsperoLight
+<h1 align="center">ProsperoLight</h1>
 
-**Moonlight game streaming, natively on PlayStation 5.**  
-Stream games and your desktop from a Sunshine-compatible PC to a homebrew-enabled PS5.
+<p align="center">
+  <strong>Moonlight game streaming, natively on PlayStation 5.</strong><br>
+  Stream games and your desktop from a Sunshine-compatible PC to a homebrew-enabled PS5.
+</p>
 
-![Latest release](https://img.shields.io/github/v/release/blackbearreloaded/ProsperoLight?include_prereleases&label=release)![PS5 homebrew](https://img.shields.io/badge/platform-PS5%20homebrew-003791)![GPL-3.0-or-later](https://img.shields.io/badge/license-GPL--3.0--or--later-blue)
+<p align="center">
+  <a href="https://github.com/blackbearreloaded/ProsperoLight/releases"><img src="https://img.shields.io/github/v/release/blackbearreloaded/ProsperoLight?include_prereleases&label=release" alt="Latest release"></a>
+  <img src="https://img.shields.io/badge/platform-PS5%20homebrew-003791" alt="PS5 homebrew">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-GPL--3.0--or--later-blue" alt="GPL-3.0-or-later"></a>
+</p>
 
-![ProsperoLight launcher showing a paired PC](docs/images/prosperolight.png)
+<p align="center">
+  <img src="docs/images/prosperolight.png" alt="ProsperoLight launcher showing a paired PC">
+</p>
 
 Features and fixes in the `main` branch may not be available in the [latest published release](https://github.com/blackbearreloaded/ProsperoLight/releases). Check the [changelog](CHANGELOG.md) and the release notes before updating.
 
