@@ -87,8 +87,8 @@ enum FormId
     kCores,
     kChroma,
     kPacing,
+    kVrrTiming,
     kLogging,
-    kDebugLog,
     kUiSound,
     kHostQuit,
     kLanguage,
@@ -520,6 +520,10 @@ void View::build()
         .add_choice(kPacing, i18n::tr("Frame pacing"),
                     {i18n::tr("Unpaced"), i18n::tr("Paced"), i18n::tr("Paced+VRR")}, 0)
         .description = i18n::tr("Smooth frame timing; VRR uses fixed refresh if unavailable.");
+    form_
+        .add_choice(kVrrTiming, i18n::tr("VRR timing"),
+                    {i18n::tr("Low Latency"), i18n::tr("Balanced"), i18n::tr("Smooth")}, 1)
+        .description = i18n::tr("VRR only: latency or smoothness.");
     form_.add_header(i18n::tr("Decoder"));
     form_
         .add_choice(kPipeline, i18n::tr("Pipeline"),
@@ -533,9 +537,6 @@ void View::build()
     form_.add_header(i18n::tr("Diagnostics"));
     form_.add_toggle(kLogging, i18n::tr("Diagnostic logs"), true).description =
         i18n::tr("Bounded logs and output interval traces saved after the stream.");
-    // Technical wording, shown in English like the other diagnostics.
-    form_.add_toggle(kDebugLog, "Debug log", false).description =
-        "Timed trace of everything the app does, for reporting a problem. Off by default.";
     form_.style.row_height = 66.0f;
     form_.style.header_height = 54.0f;
     form_.style.label_size = 26.0f;
@@ -867,7 +868,7 @@ void View::sync_games()
         item.title = app.name;
         item.tag = app.id;
         if (backend.current_app_id == app.id)
-            item.badge = "RUNNING";
+            item.badge = i18n::tr("Running");
         if (const Artwork *art = artwork(app.id))
         {
             item.texture = art->texture;
@@ -938,8 +939,9 @@ void View::sync_settings_from_config()
                      static_cast<float>(config.bitrate_mbps));
     form_.set_slider(kBitrate, static_cast<float>(config.bitrate_mbps));
     form_.set_choice(kPacing, static_cast<int>(moonlight::presentation_mode()));
+    form_.set_choice(kVrrTiming, static_cast<int>(moonlight::vrr_profile()));
+    form_.row(kVrrTiming)->disabled = moonlight::presentation_mode() != 2;
     form_.set_toggle(kLogging, prosperolight_logs_enabled() != 0);
-    form_.set_toggle(kDebugLog, prosperolight_debug_enabled() == 1);
     form_.set_toggle(kUiSound, prosperolight::ui_sound_enabled());
 
     const bool native = config.video_codec != MOONLIGHT_VIDEO_CODEC_PYROWAVE;
@@ -1043,13 +1045,10 @@ void View::apply_setting(int id)
                          i18n::tr("Try again."));
         sync_settings_from_config();
         return;
-    case kDebugLog:
-        if (!prosperolight_debug_set_enabled(form_.toggle_value(kDebugLog)))
-            toasts_.push(ui::StatusKind::danger, i18n::tr("Could not save logging"),
+    case kVrrTiming:
+        if (!moonlight::save_vrr_profile(static_cast<unsigned>(form_.choice_index(kVrrTiming))))
+            toasts_.push(ui::StatusKind::danger, i18n::tr("Could not save VRR timing"),
                          i18n::tr("Try again."));
-        else if (form_.toggle_value(kDebugLog))
-            toasts_.push(ui::StatusKind::info, "Debug log is on",
-                         "Repeat the problem, then send debug-trace.txt from the logs folder.");
         sync_settings_from_config();
         return;
     case kLogging:
@@ -2227,7 +2226,7 @@ void View::draw_games(ui::Canvas &canvas, ui::Painter &paint) const
     const float word =
         paint.label(offline   ? (model_.reconnecting() ? i18n::tr("Reconnecting")
                                                        : i18n::tr("The PC is not answering"))
-                    : running ? i18n::tr("Running on the PC")
+                    : running ? i18n::tr("Running")
                               : i18n::tr("Ready to start"),
                     kMargin + 26.0f, 325.0f, 24.0f, running && !offline ? t.success : ink);
     char text[512];
