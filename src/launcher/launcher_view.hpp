@@ -59,6 +59,13 @@ struct Palette
 class View
 {
   public:
+    bool can_hold_to_exit() const;
+
+    void set_exit_progress(float progress)
+    {
+        exit_progress_ = progress;
+    }
+
     View(Model &model, const hui::ui::Fonts &fonts);
 
     void set_version(std::string version)
@@ -144,6 +151,8 @@ class View
     static constexpr int kScreenCount = 4;
 
   private:
+    float exit_progress_ = 0.0f;
+
     struct Artwork
     {
         int app_id = 0;
