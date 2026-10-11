@@ -2,21 +2,34 @@
 
 ## 01.000.095
 
-Stable release including the features from 01.000.090 and the following improvements:
+### Stable: improved frame pacing and unified stream overlays
 
-- Reworked fixed-refresh pacing, VRR and 120 Hz output: improved low-FPS frame repetition, cadence recovery and transitions, with shared scheduling policy for native codecs and PyroWave. Added firmware-compatible VRR declaration, including system software 6.02.
-- Unified stream statistics and keyboard overlays across H.264, HEVC and PyroWave; added Escape and a live frame-interval graph that collects samples only while statistics are visible.
-- Hold Circle on the PCs screen to close ProsperoLight, with a progress bar and translated hint.
-- Fixed PyroWave overlay rendering and output-frequency formatting. Combined duplicate logging controls into one bounded diagnostic-log switch.
-- Simplified decoder settings to Classic with 3 CPU cores, including previously saved configurations. Experimental implementations remain available for development; added a reproducible decoder benchmark and automatic log collection.
-- Removed the 64-app library limit and bounded poster texture caching. Improved connection diagnostics and homebrew catalog fallback.
-- Builds now use compiler caching and signed artifact provenance. Release ZIP entries retain the permissions required by the console.
+### New
 
-**Installation:** download `PPSA99002.zip` and `SHA256SUMS`, verify the checksum, extract the complete `PPSA99002/` folder and install it in `/data/homebrew/`. Disk images are no longer distributed. Close the app before updating and keep only one installation for title ID `PPSA99002`. Saved PCs, pairing and settings are preserved.
+- **Live frame graph** in the statistics overlay.
+- **Hold Circle to close the app** from the PCs screen, with a progress bar and translated hint.
+- **Escape key** on the streaming keyboard.
+- **Extended diagnostics:** timed traces and frame-interval reports, controlled by the existing diagnostic logging switch.
 
-**VRR registration:** after updating, remove the old home-screen registration once and let ShadowMountPlus register the app again so the console reads the updated VRR declaration. Keep the app data and installed files.
+### Changed
 
-**Validation:** on-console H.264, HEVC and PyroWave sessions, fixed-refresh/VRR tests at standard and custom frame rates, and a 10-run 4K120 SDR decoder comparison. Supported modes depend on the display, firmware and host. Software timing counters do not prove physical HDMI refresh; all configurations have not been tested on every firmware.
+- **Frame pacing and VRR:** reworked fixed-refresh output, low-FPS repetition, cadence recovery and refresh-rate transitions. H.264, HEVC and PyroWave now share the scheduling policy.
+- **VRR compatibility:** updated the app declaration for older firmware, including system software 6.02.
+- **Stream overlays:** PyroWave now uses the same statistics and keyboard presentation as H.264 and HEVC. Fixed missing PyroWave overlay content and incorrect refresh-rate formatting.
+- **Decoder settings:** hidden the Classic/Adaptive and CPU-core controls. All configurations now use Classic with 3 cores; experimental implementations remain available for development.
+- **App libraries:** removed the 64-app limit and bounded poster texture caching for large libraries.
+- Added a catalog fallback when homebrew.page cannot be reached.
+- Added compiler caching and signed build provenance. Releases now contain only `PPSA99002.zip` and `SHA256SUMS`; disk images are no longer distributed.
+
+### Installation / update
+
+Title ID remains `PPSA99002`; saved PCs, settings and pairing are kept. Close the app before updating. Extract `PPSA99002.zip` and copy the complete `PPSA99002/` folder to `/data/homebrew/`. Keep only one installation for this title. `SHA256SUMS` verifies the download.
+
+> [!WARNING]
+> **Re-register ProsperoLight after updating to enable the updated VRR support.**
+> Remove its old registration from the PS5 home screen, then let ShadowMountPlus register the app again. Otherwise, the console may continue using the old VRR declaration.
+>
+> **Keep the installed app files and `/data/prosperolight/` — do not delete your settings or pairing data.**
 
 ## 01.000.090
 
