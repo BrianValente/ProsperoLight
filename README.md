@@ -108,18 +108,6 @@ Contributions and testing across different TVs, firmwares and network setups are
 > This is an independent homebrew project, not an official Sony, Moonlight or Sunshine product. It requires a compatible homebrew-enabled console and includes no exploits, proprietary Sony SDK, firmware, keys or game assets. Use at your own risk and only with hardware and content you are entitled to use.
 
 
-
-
-
-## Stream overlays and app exit
-
-Hold **Circle** on the PCs home screen for two seconds to close ProsperoLight. A progress
-bar shows the hold; releasing Circle cancels it. During streaming Circle remains
-a host-game button. H.264/HEVC and PyroWave share the same statistics and keyboard overlay, including an
-**ESC** keyboard key and a graph of the latest 180 unique-frame CPU submission
-intervals (0–50 ms). The graph only collects and draws while statistics are visible;
-it is not an HDMI scanout or input-to-photon measurement.
-
 ## Credits
 
 Built with the [PS5 Payload SDK](https://github.com/ps5-payload-dev/sdk) by John Törnblom (ps5-payload-dev).
