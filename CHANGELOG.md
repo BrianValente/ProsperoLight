@@ -1,16 +1,22 @@
 # Changelog
 
-## Unreleased
+## 01.000.095
 
-- **VRR.** Paced+VRR now reaches the television on system software 6.02 as well: the app
-  declares VRR in the form older system software understands, and no longer mistakes the
-  console's "already released" answer for a refusal. The console reads that declaration
-  only when the app is registered: after updating, delete ProsperoLight from the home
-  screen once and let ShadowMountPlus register it again (saved PCs, pairing and settings
-  are kept).
-- The held picture is sent again only on a variable-refresh output, where the display
-  needs it; on a fixed one the stream waits for the next picture as before. A repeat that
-  fails no longer ends the stream.
+Stable release including the features from 01.000.090 and the following improvements:
+
+- Reworked fixed-refresh pacing, VRR and 120 Hz output: improved low-FPS frame repetition, cadence recovery and transitions, with shared scheduling policy for native codecs and PyroWave. Added firmware-compatible VRR declaration, including system software 6.02.
+- Unified stream statistics and keyboard overlays across H.264, HEVC and PyroWave; added Escape and a live frame-interval graph that collects samples only while statistics are visible.
+- Hold Circle on the PCs screen to close ProsperoLight, with a progress bar and translated hint.
+- Fixed PyroWave overlay rendering and output-frequency formatting. Combined duplicate logging controls into one bounded diagnostic-log switch.
+- Simplified decoder settings to Classic with 3 CPU cores, including previously saved configurations. Experimental implementations remain available for development; added a reproducible decoder benchmark and automatic log collection.
+- Removed the 64-app library limit and bounded poster texture caching. Improved connection diagnostics and homebrew catalog fallback.
+- Builds now use compiler caching and signed artifact provenance. Release ZIP entries retain the permissions required by the console.
+
+**Installation:** download `PPSA99002.zip` and `SHA256SUMS`, verify the checksum, extract the complete `PPSA99002/` folder and install it in `/data/homebrew/`. Disk images are no longer distributed. Close the app before updating and keep only one installation for title ID `PPSA99002`. Saved PCs, pairing and settings are preserved.
+
+**VRR registration:** after updating, remove the old home-screen registration once and let ShadowMountPlus register the app again so the console reads the updated VRR declaration. Keep the app data and installed files.
+
+**Validation:** on-console H.264, HEVC and PyroWave sessions, fixed-refresh/VRR tests at standard and custom frame rates, and a 10-run 4K120 SDR decoder comparison. Supported modes depend on the display, firmware and host. Software timing counters do not prove physical HDMI refresh; all configurations have not been tested on every firmware.
 
 ## 01.000.090
 
