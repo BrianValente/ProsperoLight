@@ -15,11 +15,14 @@ class PerformanceOptions(unittest.TestCase):
     def test_beta_release_is_opt_in_and_not_latest(self):
         workflow = (ROOT / ".github/workflows/tooling.yml").read_text()
         self.assertIn('release_flags=(--prerelease --latest=false)', workflow)
-        # Both steps select the same beta versions, including the current one.
+        # Build settings and prerelease status are independent: stable releases
+        # retain the validated settings without being published as a beta.
         version = json.loads((ROOT / "sce_sys/param.json").read_text())["contentVersion"]
         betas = re.findall(r"^ +(01\.000\.062(?:\|[0-9.]+)+)\)$", workflow, re.MULTILINE)
         self.assertEqual(len(betas), 2)
-        self.assertEqual(betas[0], betas[1])
+        measured, prereleases = map(lambda value: set(value.split("|")), betas)
+        self.assertTrue(prereleases.issubset(measured))
+        self.assertNotIn("01.000.095", prereleases)
         self.assertIn(version, betas[0].split("|"))
         # Only the release the run creates takes the flags: an existing one is not edited.
         self.assertEqual(workflow.count('"${release_flags[@]}"'), 1)
