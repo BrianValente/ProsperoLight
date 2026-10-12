@@ -283,7 +283,7 @@ class ToolTests(unittest.TestCase):
         title = json.loads((ROOT / "sce_sys/param.json").read_text(encoding="utf-8"))["titleId"]
 
         # Filesystem access is asked for before anything else runs.
-        body = main[main.index("int main()") :]
+        body = main[main.index("int main(int argc, char **argv)") :]
         self.assertLess(body.index("storage::Initialize();"), body.index("RunVideoOutputSelfTest();"))
         self.assertLess(body.index("storage::Initialize();"), body.index("launcher::Run("))
         # The paths name this title; privileged work stays in upstream Lapy.
@@ -339,7 +339,7 @@ class ToolTests(unittest.TestCase):
         close = platform[platform.index("model.Shutdown();") :]
         self.assertLess(close.index("audio_out.stop();"), close.index("pad.close();"))
         self.assertLess(close.index("pad.close();"), close.index("display.close();"))
-        loop = main[main.index("for (;;)", main.index("int main()")) :]
+        loop = main[main.index("for (;;)", main.index("int main(int argc, char **argv)")) :]
         self.assertLess(loop.index("launcher::Run("), loop.index("moonlight_stream_run("))
         # After a stream above 60 Hz the television is left to switch back.
         self.assertIn("HFR_SETTLE_MS ?= 100", makefile)
@@ -802,7 +802,7 @@ class ToolTests(unittest.TestCase):
         script = (ROOT / "tooling/native/ps5-pie.ld").read_text(encoding="utf-8")
         tool = (ROOT / "tools/symbolize-crash.py").read_text(encoding="utf-8")
 
-        body = main[main.index("int main()") :]
+        body = main[main.index("int main(int argc, char **argv)") :]
         self.assertLess(body.index("storage::Initialize();"), body.index("crash::Install("))
         self.assertLess(body.index("crash::Install("), body.index("launcher::Run("))
         for name in ("SIGSEGV", "SIGBUS", "SIGILL", "SIGFPE", "SIGABRT"):
@@ -1007,7 +1007,7 @@ class ToolTests(unittest.TestCase):
         # Every request to a PC carries that PC's port, and an answer from
         # another endpoint than the selected one never becomes its state.
         self.assertEqual(app.count("job.port = moonlight_config_host_port("), 4)
-        self.assertEqual(app.count("next.port = moonlight_config_host_port("), 2)
+        self.assertEqual(app.count("next.port = moonlight_config_host_port("), 3)
         self.assertIn("moonlight_backend_refresh(job.host, job.port, &result->snapshot)", app)
         self.assertIn("if (!IsSelected(job.host, job.port))", app)
 

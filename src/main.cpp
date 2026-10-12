@@ -7,6 +7,7 @@
 #include "app_storage.hpp"
 #include "lan_http_report.hpp"
 #include "crash_report.hpp"
+#include "forwarded_launch.hpp"
 #include "connecting_plate.hpp"
 #include "launcher/launcher.hpp"
 #include "moonlight_stream.hpp"
@@ -14,6 +15,7 @@
 #include "native_modules.hpp"
 #include "presentation_preferences.hpp"
 
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
@@ -249,20 +251,40 @@ void RunVideoOutputSelfTest()
 
 } // namespace
 
-int main()
+int main(int argc, char **argv)
 {
+    // Where the time before the first frame goes, for the diagnostic log.
+    const auto entered = std::chrono::steady_clock::now();
+    const auto since_entry = [entered]
+    {
+        return static_cast<long long>(std::chrono::duration_cast<std::chrono::milliseconds>(
+                                          std::chrono::steady_clock::now() - entered)
+                                          .count());
+    };
     // Resolve process-owned system modules before storage grants filesystem access.
     prosperolight::native_modules::PrepareBeforeStorage();
+    const long long modules_ms = since_entry();
     int decoder_warmup[4] = {-1, -1, -1, -1};
     if (prosperolight::native_modules::Result(prosperolight::native_modules::video_decoder) == 0)
         moonlight_native_decoder_warmup(decoder_warmup);
+    const long long warmup_ms = since_entry();
     storage::Initialize();
+    prosperolight_debug_line(
+        "main", "start-up: system modules %lld ms, decoder warm-up %lld ms, storage %lld ms",
+        modules_ms, warmup_ms - modules_ms, since_entry() - warmup_ms);
     prosperolight::native_modules::LogResults();
     std::printf("[PL] decoder libraries: before-storage core=%08x h264=%08x hevc=%08x hdr=%08x\n",
                 static_cast<unsigned>(decoder_warmup[0]), static_cast<unsigned>(decoder_warmup[1]),
                 static_cast<unsigned>(decoder_warmup[2]), static_cast<unsigned>(decoder_warmup[3]));
     // From here a fault leaves a report beside the log.
     crash::Install(storage::paths().logs, storage::log_descriptor());
+    // A home-screen forwarder names the stream to start (docs/FORWARDER.md).
+    prosperolight::pending_forwarded_launch() = prosperolight::parse_forwarded_launch(argc, argv);
+    if (prosperolight::pending_forwarded_launch().requested())
+        std::printf("[PL] main: forwarded launch pc=\"%s\" app=\"%s\" exit_after_stream=%d\n",
+                    prosperolight::pending_forwarded_launch().pc.c_str(),
+                    prosperolight::pending_forwarded_launch().app.c_str(),
+                    prosperolight::pending_forwarded_launch().exit_after_stream ? 1 : 0);
 #if PROSPEROLIGHT_VIDEO_OUTPUT_SELF_TEST_FPS != 0
     RunVideoOutputSelfTest();
 #endif
@@ -361,5 +383,14 @@ int main()
                       streams, stream_result, metrics.presented_frames, settle_ms);
         Log(line);
         sceKernelUsleep(settle_ms * 1000u);
+        // A forwarder asked to return to the home screen once its stream is over. A
+        // stream that failed opens the launcher instead, which says why.
+        if (selection.exit_after_stream && stream_result == 0)
+        {
+            Log("[PL] main: closing after the forwarded stream");
+            prosperolight_release_splash();
+            (void)sceSystemServiceLoadExec("exit", nullptr);
+            KeepProcessAlive();
+        }
     }
 }
