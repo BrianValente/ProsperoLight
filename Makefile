@@ -25,6 +25,15 @@ AUDIO_MAX_BACKLOG_MS ?= 0
 PRESENT_OVERLAP ?= 1
 FLIP_POLL_US ?= 500
 PERFORMANCE_DETAIL ?= 0
+# Developer-only PR0 argv receipt; never enabled in ordinary releases.
+LAUNCH_PROOF ?= 0
+TEST_LAB ?= 0
+ifeq ($(TEST_LAB),1)
+override PERFORMANCE_DETAIL := 1
+override LAN_TELEMETRY := 0
+BUILD_LABEL ?= test-lab-development
+export BUILD_LABEL
+endif
 # Slices above 1080p, adaptive Videodec2 depth (the Classic setting is depth 1).
 VIDEO_SLICES_PER_FRAME ?= 8
 DECODER_PIPELINE_DEPTH ?= 3
@@ -56,6 +65,8 @@ APP_DEFINITIONS += PROSPEROLIGHT_AUDIO_MAX_BACKLOG_MS=$(AUDIO_MAX_BACKLOG_MS)
 APP_DEFINITIONS += PROSPEROLIGHT_PRESENT_OVERLAP=$(PRESENT_OVERLAP)
 APP_DEFINITIONS += PROSPEROLIGHT_FLIP_POLL_US=$(FLIP_POLL_US)
 APP_DEFINITIONS += PROSPEROLIGHT_PERFORMANCE_DETAIL=$(PERFORMANCE_DETAIL)
+APP_DEFINITIONS += PROSPEROLIGHT_LAUNCH_PROOF=$(LAUNCH_PROOF)
+APP_DEFINITIONS += PROSPEROLIGHT_TEST_LAB=$(TEST_LAB)
 APP_DEFINITIONS += VIDEO_SLICES_PER_FRAME=$(VIDEO_SLICES_PER_FRAME)
 APP_DEFINITIONS += DECODER_PIPELINE_DEPTH=$(DECODER_PIPELINE_DEPTH)
 APP_DEFINITIONS += DECODER_CPU_PRIORITY=$(DECODER_CPU_PRIORITY)
@@ -216,7 +227,7 @@ $(HOST_ELEVATION_TEST): tests/test_elevation.cpp src/elevation/elevation.cpp \
 
 test-integration:
 	@printf '%s\n' '==> [test-integration] Running host tooling integration tests'
-	@python3 -m unittest discover -s tests -p 'test_*.py' -v
+	@PYTHONPATH="$(CURDIR)/tools/test-lab/src:$(CURDIR)/tools/test-lab:$${PYTHONPATH}" python3 -m unittest discover -s tests -p 'test_*.py' -v
 
 .PHONY: launcher-check launcher-layout-check fonts
 # The launcher on the PC: behaviour checks and a picture of every state.
@@ -390,3 +401,9 @@ $(HOST_UNIT_TEST) test-integration test-stream-performance test-performance-guar
 
 # The app folder carries the helper that installs the next release.
 app: self-update-helper
+
+.PHONY: test-lab-test
+test-lab-test:
+	@PYTHONPATH="$(CURDIR)/tools/test-lab/src:$(CURDIR)/tools/test-lab:$${PYTHONPATH}" python3 -m unittest discover -s tests -p 'test_test_lab*.py' -v
+	@PYTHONPATH="$(CURDIR)/tools/test-lab/src:$(CURDIR)/tools/test-lab:$${PYTHONPATH}" python3 -m unittest discover -s tests -p 'test_decoder_benchmark.py' -v
+	@PYTHONPATH="$(CURDIR)/tools/test-lab/src:$(CURDIR)/tools/test-lab:$${PYTHONPATH}" python3 -m unittest discover -s tests -p 'test_pacing_test_tools.py' -v

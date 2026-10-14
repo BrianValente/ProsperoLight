@@ -10,6 +10,9 @@
 #include "scanout_trace.hpp"
 #include "pacing_decision_trace.hpp"
 #include "host_preferences.hpp"
+#if PROSPEROLIGHT_TEST_LAB
+#include "test_lab_lifecycle.hpp"
+#endif
 #include "ps5_dualsense.hpp"
 
 #include <limits.h>
@@ -55,6 +58,7 @@
 #include "../../third_party/moonlight-common-c/src/Limelight.h"
 #if PROSPEROLIGHT_PYROWAVE
 #include "pyrowave/stream_backend.hpp"
+#include "pyrowave/video/ps5_presentation_stats.hpp"
 #endif
 
 // Frame slots cover every picture the deepest pipeline can hold, one waiting
@@ -2222,6 +2226,7 @@ static void *video_decode_thread(void *context)
 
 static moonlight::FramePacing stream_pacer;
 static unsigned stream_presentation_mode = 0;
+static unsigned stream_vrr_profile = 1;
 
 static bool wait_presentation_deadline(native_renderer_state_t *state,
                                        const stream_ready_frame_t &item,
@@ -2434,7 +2439,7 @@ static void *video_present_thread(void *context)
     vrr_repeats.reset(state->stream_fps);
     uint32_t vrr_width = 0, vrr_height = 0, vrr_refresh = 0;
     native_agc_output_status(&vrr_width, &vrr_height, &vrr_refresh);
-    vrr_repeats.configure(moonlight::vrr_profile(), vrr_refresh);
+    vrr_repeats.configure(stream_vrr_profile, vrr_refresh);
     unsigned cadence_rate = state->stream_fps, cadence_copies = vrr_repeats.repeat_factor();
     struct VrrSummary
     {
@@ -2451,8 +2456,8 @@ static void *video_present_thread(void *context)
                      (unsigned long long)vrr.stats.wait_total_us,
                      (unsigned long long)vrr.stats.late_max_us,
                      (unsigned long long)vrr.stats.gap_max_us, vrr.source_rate(),
-                     vrr.repeat_factor(), (unsigned long long)vrr.interval(),
-                     moonlight::vrr_profile(), (unsigned long long)vrr.playout_reserve_us(),
+                     vrr.repeat_factor(), (unsigned long long)vrr.interval(), stream_vrr_profile,
+                     (unsigned long long)vrr.playout_reserve_us(),
                      (unsigned long long)vrr.feedback_misses(),
                      (unsigned long long)vrr.feedback_ambiguous(),
                      (unsigned long long)vrr.feedback_epoch_resets());
@@ -2706,6 +2711,10 @@ static int moonlight_renderer_setup(int video_format, int width, int height, int
 
     active_renderer = state;
     active_renderer->last_result = 0;
+#if PROSPEROLIGHT_TEST_LAB
+    if (prosperolight::test_lab::active())
+        prosperolight::test_lab::context().negotiated(video_format, width, height, redraw_rate);
+#endif
     snprintf(receipt, sizeof(receipt),
              "Moonlight callbacks setup: format=%x display=%dx%d fps=%d flags=%x capabilities=%x",
              video_format, width, height, redraw_rate, dr_flags,
@@ -3965,7 +3974,8 @@ static int prepare_native_session(client_identity_t *identity, gs_server_t *serv
                                   STREAM_CONFIGURATION *configuration,
                                   const moonlight::ResolvedStreamProfile &profile, int gamepad_mask,
                                   const char *host, uint16_t host_port, const char *app_name,
-                                  int requested_app_id, prosperolight::HostPreferences &preferences)
+                                  int requested_app_id, prosperolight::HostPreferences &preferences,
+                                  const moonlight_session_overrides_t *overrides)
 {
     app_entry_t *apps = NULL;
     app_entry_t *app;
@@ -3976,7 +3986,9 @@ static int prepare_native_session(client_identity_t *identity, gs_server_t *serv
     int result;
 
     gs_log_set_sink(nvhttp_log_sink);
-    result = identity_init(identity, MOONLIGHT_IDENTITY_DIRECTORY);
+    result = overrides && overrides->enabled
+                 ? identity_init_existing(identity, MOONLIGHT_IDENTITY_DIRECTORY)
+                 : identity_init(identity, MOONLIGHT_IDENTITY_DIRECTORY);
     if (result != GS_OK)
         return result;
     http_init(identity, 1);
@@ -4031,7 +4043,15 @@ static int prepare_native_session(client_identity_t *identity, gs_server_t *serv
         snprintf(settings_host.address, sizeof(settings_host.address), "%s", server->address);
         snprintf(settings_host.unique_id, sizeof(settings_host.unique_id), "%s", server->unique_id);
         settings_host.http_port = server->http_port;
-        preferences = prosperolight::host_preferences(&settings_host);
+        if (overrides && overrides->enabled)
+        {
+            preferences = {overrides->extensions != 0, overrides->host_vrr,
+                           overrides->display,         overrides->scale,
+                           overrides->optimize != 0,   overrides->mute_host != 0,
+                           overrides->quit_host != 0};
+        }
+        else
+            preferences = prosperolight::host_preferences(&settings_host);
         if (preferences.extensions && preferences.display == 2 &&
             (server->host_capabilities & 3u) != 3u)
         {
@@ -4039,8 +4059,37 @@ static int prepare_native_session(client_identity_t *identity, gs_server_t *serv
             return GS_FAILED;
         }
     }
+#if PROSPEROLIGHT_TEST_LAB
+    if (prosperolight::test_lab::active())
+    {
+        // Use the existing paired identity. A test must launch a fresh session,
+        // never resume a Desktop stream left by another client.
+        result = gs_quit_app(server);
+        snprintf(notification.message, sizeof(notification.message),
+                 "Test Lab paired host cleanup: cancel_rc=%08x error=%s", (uint32_t)result,
+                 gs_error ? gs_error : "");
+        (void)lan_http_report_text(notification.message);
+        if (result != GS_OK)
+        {
+            prosperolight::test_lab::context().fail("HOST_CLEANUP_REJECTED");
+            return result;
+        }
+        result = gs_refresh_paired_status(server);
+        if (result != GS_OK || server->current_game != 0)
+        {
+            prosperolight::test_lab::context().fail("HOST_CLEANUP_UNCONFIRMED");
+            return result != GS_OK ? result : GS_WRONG_STATE;
+        }
+        prosperolight::test_lab::context().host_cleanup_confirmed();
+    }
+#endif
     if (server->current_game && server->current_game != target_id)
     {
+        if (overrides && overrides->enabled)
+        {
+            gs_error = "HOST_BUSY: another host app is active";
+            return GS_WRONG_STATE;
+        }
         result = gs_quit_app(server);
         if (result != GS_OK)
             return result;
@@ -4167,6 +4216,50 @@ int moonlight_stream_run(const moonlight_stream_options_t *options,
         options ? options->video_codec : MOONLIGHT_VIDEO_CODEC_H264,
         options ? options->chroma_sampling : MOONLIGHT_CHROMA_420, options && options->hdr_enabled);
     const bool use_pyrowave = profile.decoder_backend == moonlight::DecoderBackend::PyroWaveRadv;
+#if PROSPEROLIGHT_TEST_LAB
+    struct TestProbe
+    {
+        native_renderer_state_t *renderer;
+        connection_loading_state_t *loading;
+        ps5_controller_state_t *controller;
+        bool pyrowave;
+        std::atomic<bool> connected{false};
+        std::atomic<bool> controller_initialized{false};
+    } test_probe{&renderer, &loading, &controller, use_pyrowave};
+    if (prosperolight::test_lab::active())
+        prosperolight::test_lab::context().attach(
+            [](void *data)
+            {
+                auto &p = *static_cast<TestProbe *>(data);
+                prosperolight::test_lab::Observation observed;
+                observed.connected = p.connected.load(std::memory_order_acquire);
+                if (!observed.connected)
+                    return observed;
+#if PROSPEROLIGHT_PYROWAVE
+                if (p.pyrowave)
+                {
+                    observed.unique_frames = prosperolight::pyrowave::completed_unique();
+                    observed.output_valid = observed.unique_frames != 0;
+                    return observed;
+                }
+#endif
+                observed.unique_frames = p.renderer->presented.load(std::memory_order_relaxed);
+                observed.output_valid =
+                    observed.unique_frames != 0 && p.renderer->present_result.load() == 0;
+                return observed;
+            },
+            [](void *data)
+            {
+                auto &p = *static_cast<TestProbe *>(data);
+                if (p.controller_initialized.load(std::memory_order_acquire))
+                    p.controller->requested_stop.store(1);
+                http_interrupt();
+                // The existing loading worker performs LiInterruptConnection;
+                // after connection, the stream owner follows LiStopConnection.
+                p.loading->cancel_requested.store(1);
+            },
+            &test_probe, *options);
+#endif
     const uint32_t resolution =
         options ? options->stream_resolution : MOONLIGHT_STREAM_RESOLUTION_1080P;
     const unsigned stream_width = resolution == MOONLIGHT_STREAM_RESOLUTION_2160P   ? 3840
@@ -4237,7 +4330,15 @@ int moonlight_stream_run(const moonlight_stream_options_t *options,
     lan_http_report_set_host(host);
     // The loading renderer opens VideoOut before decoder/connection setup.
     // Apply this session's policy before that first open, not after negotiation.
-    stream_presentation_mode = moonlight::presentation_mode();
+    stream_presentation_mode = options && options->session_overrides.enabled
+                                   ? options->session_overrides.pacing
+                                   : moonlight::presentation_mode();
+    stream_vrr_profile = options && options->session_overrides.enabled
+                             ? options->session_overrides.vrr_profile
+                             : moonlight::vrr_profile();
+#if PROSPEROLIGHT_PYROWAVE
+    ps5_stream_output_policy(stream_presentation_mode);
+#endif
     native_agc_set_vrr(stream_presentation_mode == 2);
     native_agc_set_unpaced_90_fps_unpeg(stream_presentation_mode == 0);
     native_agc_set_vsync((int)vsync_enabled);
@@ -4440,6 +4541,9 @@ configure_stream:
     stream_config.pyrowaveCompression = 0;
     stream_config.encryptionFlags = ENCFLG_NONE;
     controller_result = ps5_controller_init(&controller);
+#if PROSPEROLIGHT_TEST_LAB
+    test_probe.controller_initialized.store(true, std::memory_order_release);
+#endif
     controller_ready = controller_result == 0;
     prosperolight::dualsense::Init(controller.user_id, controller.handle);
     if (controller_ready && controller.user_id >= 0)
@@ -4454,6 +4558,10 @@ configure_stream:
     (void)lan_http_report_text(notification.message);
     if (!controller_ready)
     {
+#if PROSPEROLIGHT_TEST_LAB
+        if (prosperolight::test_lab::active())
+            prosperolight::test_lab::context().fail("NO_CONTROLLER");
+#endif
         gs_error = "PS5 controller ownership was unavailable; retry the stream";
         result = controller_result;
         goto done;
@@ -4480,7 +4588,8 @@ configure_stream:
     identity_initialized = 1;
     result = prepare_native_session(&client_identity, &gs_server, &stream_config, profile,
                                     controller_ready ? prosperolight::dualsense::ActiveMask() : 0,
-                                    host, host_port, app_name, app_id, session_preferences);
+                                    host, host_port, app_name, app_id, session_preferences,
+                                    options ? &options->session_overrides : nullptr);
     if (result != GS_OK)
         goto done;
     session_started = 1;
@@ -4523,7 +4632,8 @@ configure_stream:
         connecting_screen_release();
         prosperolight::pyrowave::prepare_callbacks(fail_stream, vsync_enabled != 0,
                                                    !options || options->display_area ==
-                                                                   MOONLIGHT_DISPLAY_AREA_TV_SAFE);
+                                                                   MOONLIGHT_DISPLAY_AREA_TV_SAFE,
+                                                   stream_presentation_mode, stream_vrr_profile);
     }
 #endif
     stream_pacer.reset(renderer.stream_fps);
@@ -4568,6 +4678,9 @@ configure_stream:
         goto done;
     }
     connection_active = 1;
+#if PROSPEROLIGHT_TEST_LAB
+    test_probe.connected.store(true, std::memory_order_release);
+#endif
     stream_started = 1;
     // Connected: what is left is the first picture.
     connecting_screen_stage(0.88f, 0.97f);
@@ -4746,6 +4859,12 @@ configure_stream:
     }
 
 done:
+#if PROSPEROLIGHT_TEST_LAB
+    if (prosperolight::test_lab::active() && result == GS_NOT_SUPPORTED_MODE)
+        prosperolight::test_lab::context().fail("UNSUPPORTED_MODE");
+    if (prosperolight::test_lab::active())
+        prosperolight::test_lab::context().join();
+#endif
 #if PROSPEROLIGHT_PYROWAVE
     if (result != 0 && use_pyrowave)
     {
@@ -4920,10 +5039,24 @@ done:
              (uint32_t)physical_input.mouse_unload_result);
     (void)lan_http_report_text(notification.message);
     ps5_controller_shutdown(&controller);
-    if (session_started && (!controller.requested_stop || session_preferences.quit_host))
+    bool quit_host_on_stop = session_preferences.quit_host;
+#if PROSPEROLIGHT_TEST_LAB
+    // A lab owns a bounded host session even when the saved Quit Host option is off.
+    quit_host_on_stop = quit_host_on_stop || prosperolight::test_lab::active();
+#endif
+    if (session_started && (!controller.requested_stop || quit_host_on_stop))
     {
         http_set_timeout_ms(2000);
         int quit_result = gs_quit_app(&gs_server);
+#if PROSPEROLIGHT_TEST_LAB
+        if (prosperolight::test_lab::active())
+        {
+            const int refresh_result =
+                quit_result == GS_OK ? gs_refresh_paired_status(&gs_server) : GS_WRONG_STATE;
+            prosperolight::test_lab::context().host_exit_cleanup_result(
+                quit_result == GS_OK && refresh_result == GS_OK && gs_server.current_game == 0);
+        }
+#endif
         snprintf(notification.message, sizeof(notification.message),
                  "Native NVHTTP cancel: rc=%08x error=%s", (uint32_t)quit_result,
                  gs_error ? gs_error : "");
@@ -5022,5 +5155,12 @@ done:
                                    : 0;
         snprintf(metrics->error, sizeof(metrics->error), "%s", stream_error);
     }
+#if PROSPEROLIGHT_TEST_LAB
+    if (prosperolight::test_lab::active() && result == 0 &&
+        (source_idle_result != 0 || present_cleanup_result != 0 || delete_result != 0))
+        result = source_idle_result       ? source_idle_result
+                 : present_cleanup_result ? present_cleanup_result
+                                          : delete_result;
+#endif
     return result;
 }

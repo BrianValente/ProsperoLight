@@ -1,7 +1,10 @@
-#include "presentation_preferences.hpp"
 #include "app_storage.hpp"
 // SPDX-License-Identifier: MIT
 #include "pyrowave_video_backend.hpp"
+#include "ps5_presentation_stats.hpp"
+#if PROSPEROLIGHT_TEST_LAB
+#include "test_lab_lifecycle.hpp"
+#endif
 #include <ctime>
 extern "C" int wsi_ps5_configure_output(int hdr, int vsync, int high_refresh,
                                         const char *metadata_path);
@@ -13,9 +16,10 @@ static double clock_ms()
     return t.tv_sec * 1000.0 + t.tv_nsec / 1e6;
 }
 void PyroWaveVideoBackend::initialize(unsigned width, unsigned height, unsigned fps, bool chroma444,
-                                      bool hdr, bool vsync, bool tv_safe)
+                                      bool hdr, bool vsync, bool tv_safe, unsigned pacing)
 {
-    const bool request_vrr = moonlight::presentation_mode() == 2;
+    ps5_stream_output_policy(pacing);
+    const bool request_vrr = pacing == 2;
     const bool prefer_high_refresh = fps > 60 || request_vrr;
     const int output_flags = (fps > 60 || request_vrr ? 1 : 0) | (request_vrr ? 2 : 0);
     vsync = vsync || request_vrr;
@@ -127,6 +131,13 @@ void PyroWaveVideoBackend::initialize(unsigned width, unsigned height, unsigned 
     conversion.range[2] = hdr ? 1023.0f / 896.0f : 255.0f / 224.0f;
     conversion.range[3] = tv_safe ? 1792.0f / 1920.0f : 1.0f;
     renderer_.initialize(c_, *output_, sc.imageFormat, views_);
+#if PROSPEROLIGHT_TEST_LAB
+    if (prosperolight::test_lab::active())
+        prosperolight::test_lab::context().backend_output(
+            sc.imageExtent.width, sc.imageExtent.height, unsigned(refresh_ * 100.0 + 0.5), pacing,
+            sc.presentMode == VK_PRESENT_MODE_FIFO_KHR,
+            sc.imageColorSpace == VK_COLOR_SPACE_HDR10_ST2084_EXT);
+#endif
     log_line("presentation initialized 3840x2160 %.3f Hz %s %s images=%u", refresh_,
              hdr ? "HDR10" : "SDR", vsync ? "FIFO" : "IMMEDIATE", n);
 }
