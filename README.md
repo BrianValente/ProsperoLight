@@ -14,7 +14,7 @@
   <img src="https://img.shields.io/badge/platform-PS5%20homebrew-003791" alt="PS5 homebrew">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-GPL--3.0--or--later-blue" alt="GPL-3.0-or-later"></a>
 </br>
-<a href="https://discord.gg/zjKNPhQag"><img src="https://dcbadge.limes.pink/api/server/https://discord.gg/zjKNPhQag" alt="Latest release"></a>
+<a href="https://discord.gg/xermTyfngt"><img src="https://dcbadge.limes.pink/api/server/https://discord.gg/xermTyfngt" alt="Latest release"></a>
 </p>
 
 <p align="center">
