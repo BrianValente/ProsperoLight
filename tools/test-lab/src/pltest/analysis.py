@@ -267,6 +267,16 @@ def _analyze_run(profile, report, directory):
                 callback_to_flip_observed_us=distribution([r['completion_us']-r['callback_us']
                     for r in phase_rows if r['outcome']==1 and left<=r['completion_us']<right and r['completion_us']>=r['callback_us']])))
         result['trace'] = {'count': len(rows), 'measured_count': len(samples), 'omitted': omitted}
+        if client['codec'] in ('hevc', 'h264'):
+            from .bottleneck import diagnose
+            result['pipeline_diagnosis'] = diagnose(profile, report, rows, performance, begin, end, omitted)
+            result['stream_characteristics'] = {key: performance.get(key) for key in (
+                'stream_profile', 'stream_level', 'stream_bit_depth', 'stream_reference_frames',
+                'stream_reorder_frames', 'stream_required_dpb_frames', 'max_dpb_frames',
+                'requested_slices_per_frame', 'observed_slices_min', 'observed_slices_max',
+                'stream_pps_features_known', 'stream_cabac', 'stream_hevc_tiles', 'stream_hevc_wpp',
+                'stream_hevc_tile_columns', 'stream_hevc_tile_rows', 'h264_b_pictures',
+                'decoder_pipeline_depth', 'decoder_cpu_affinity')}
         result['browser_phases'] = browser_phases(host)
         result['host'] = {'raf_fps': host.get('raf_fps'), 'scene': host.get('scene'),
                           'gpu_samples': len(host.get('gpu_samples', [])), 'encoding_latency_ms': None}
