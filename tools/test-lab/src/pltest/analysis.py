@@ -133,6 +133,36 @@ def _analyze_run(profile, report, directory):
     try:
         performance = json.loads(read_bounded(artifact_dir / 'performance-last.json'))
         from .session_evidence import native_effective_settings
+        from .decoder_lifecycle import decoder_lifecycle
+        lifecycle = decoder_lifecycle(performance)
+        result['decoder_lifecycle'] = lifecycle
+        probe = bool(profile.get('capture', {}).get('decoder_capacity_probe', False))
+        injected = performance.get('decoder_test_capacity_errors', 0)
+        if injected:
+            issues.append('DEVELOPER_DECODER_CAPACITY_PROBE')
+        if probe and result['functional_verdict'] == 'PASS' and (injected != 1 or performance.get('decoder_generation', 0) < 2 or
+                      performance.get('decoder_recovery_successes', 0) != 1):
+            result['functional_verdict'] = 'FAIL'
+            issues.append('DECODER_PROBE_NOT_RECOVERED')
+        if profile.get('capture', {}).get('decoder_capacity_probe_first') and (
+                type(performance.get('decoder_test_capacity_decoded_before')) is not int or
+                type(performance.get('decoder_test_capacity_presented_before')) is not int or
+                performance.get('decoder_test_capacity_decoded_before') != 0 or
+                performance.get('decoder_test_capacity_presented_before') != 0):
+            result['functional_verdict'] = 'FAIL'
+            issues.append('DECODER_PROBE_NOT_BEFORE_FIRST_OUTPUT')
+        if lifecycle['available'] and not lifecycle.get('valid'):
+            if result['functional_verdict'] == 'PASS':
+                result['functional_verdict'] = 'FAIL'
+            issues.append('DECODER_LIFECYCLE_INCOMPLETE')
+        if performance.get('decoder_lifecycle_failures', 0):
+            result['functional_verdict'] = 'FAIL'
+            issues.append('DECODER_LIFECYCLE_FAILED')
+        if performance.get('decoder_recovery_failures', 0):
+            result['functional_verdict'] = 'FAIL'
+            issues.append('DECODER_RECOVERY_FAILED')
+        if performance.get('decoder_reconfiguration_count', 0):
+            issues.append('DECODER_RECONFIGURED')
         effective = native_effective_settings(performance)
         result['session_settings'].update(effective)
         issues.extend('EFFECTIVE_FIELD_UNVERIFIED:' + key for key, field in effective.items()
@@ -150,7 +180,14 @@ def _analyze_run(profile, report, directory):
         rows, omitted = parse_trace(data)
         if omitted: issues.append('TRACE_TRUNCATED')
         if not performance.get('performance_detail'): issues.append('DETAILED_TIMING_DISABLED')
-        if performance.get('decode_errors', 0) or performance.get('drain_faults', 0) or performance.get('present_errors', 0):
+        faults = performance.get('decode_errors', 0) + performance.get('drain_faults', 0)
+        recovered = (lifecycle.get('valid') and faults > 0 and
+                     performance.get('decoder_recovery_successes', 0) == faults and
+                     performance.get('decoder_recovery_failures', 0) == 0 and
+                     performance.get('decoder_lifecycle_state') in ('ready', 'stopping', 'stopped'))
+        if recovered:
+            issues.append('RECOVERED_DECODER_FAULT')
+        if (faults and not recovered) or performance.get('present_errors', 0):
             result['functional_verdict'] = 'FAIL'; issues.append('DECODER_OR_PRESENT_FAULT')
         if performance.get('network_frame_gaps', 0) or performance.get('unrecoverable_frames', 0):
             issues.append('NETWORK_LOSS')
