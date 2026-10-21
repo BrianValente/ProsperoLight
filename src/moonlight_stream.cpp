@@ -642,6 +642,7 @@ typedef struct native_renderer_state
     moonlight::video::RuntimePolicy stream_policy;
     bool policy_keyframe_wait{};
     uint64_t policy_dropped_aus{};
+    uint64_t delivery_session_floor_us{};
     moonlight::TimingHistogram au_size;
     uint32_t active_pps{256};
     moonlight::video::PpsFeatures
@@ -896,6 +897,7 @@ static void save_frame_trace(unsigned mode)
     size_t used = 0;
     int length = snprintf(batch, sizeof(batch),
                           "# schema=2,count=%zu,omitted=%zu\n"
+                          "# scope=dequeued_AUs_only;receive_us_excludes_upstream_discards\n"
                           "frame,bytes,pending,outcome,receive_us,enqueue_us,callback_network_us,"
                           "callback_us,pts_us,decode_us,ready_us,present_wait_us,submit_us,"
                           "completion_us,host_us\n",
@@ -1082,6 +1084,53 @@ static void save_performance_summary(const native_renderer_state_t &state,
              policy.throughput_exceeded ? "true" : "false", policy.pending_depth,
              (unsigned long long)state.policy_dropped_aus,
              policy.allow_reconfiguration ? "true" : "false");
+#ifdef LI_VIDEO_DELIVERY_STATS_VERSION
+    LI_VIDEO_DELIVERY_STATS delivery{};
+    if (LiGetVideoDeliveryStats(&delivery) && state.delivery_session_floor_us &&
+        delivery.start_us >= state.delivery_session_floor_us)
+    {
+        ok = ok &&
+             report_append(
+                 report, sizeof(report), &length,
+                 "\"video_delivery\":{\"available\":true,\"version\":1,\"scope\":\"whole-session\","
+                 "\"clock\":\"Limelight "
+                 "monotonic\",\"start_us\":%llu,\"end_us\":%llu,\"quiescent\":%s,"
+                 "\"video_packets\":%llu,"
+                 "\"video_bytes\":%llu,"
+                 "\"completed_frame_events\":%llu,"
+                 "\"recovery_filtered_aus\":%llu,"
+                 "\"empty_aus\":%llu,"
+                 "\"assembled_aus\":%llu,"
+                 "\"offered_aus\":%llu,"
+                 "\"queue_accepted_aus\":%llu,"
+                 "\"dequeued_aus\":%llu,"
+                 "\"overflow_discarded_aus\":%llu,"
+                 "\"refresh_discarded_aus\":%llu,"
+                 "\"shutdown_discarded_aus\":%llu,"
+                 "\"interrupted_discarded_aus\":%llu,"
+                 "\"allocation_discarded_aus\":%llu,"
+                 "\"direct_submit\":%s},\n",
+                 (unsigned long long)delivery.start_us, (unsigned long long)delivery.end_us,
+                 delivery.end_us ? "true" : "false", (unsigned long long)delivery.video_packets,
+                 (unsigned long long)delivery.video_bytes,
+                 (unsigned long long)delivery.completed_frame_events,
+                 (unsigned long long)delivery.recovery_filtered_aus,
+                 (unsigned long long)delivery.empty_aus, (unsigned long long)delivery.assembled_aus,
+                 (unsigned long long)delivery.offered_aus,
+                 (unsigned long long)delivery.queue_accepted_aus,
+                 (unsigned long long)delivery.dequeued_aus,
+                 (unsigned long long)delivery.overflow_discarded_aus,
+                 (unsigned long long)delivery.refresh_discarded_aus,
+                 (unsigned long long)delivery.shutdown_discarded_aus,
+                 (unsigned long long)delivery.interrupted_discarded_aus,
+                 (unsigned long long)delivery.allocation_discarded_aus,
+                 delivery.direct_submit ? "true" : "false");
+    }
+    else
+#endif
+        ok = ok && report_append(
+                       report, sizeof(report), &length,
+                       "\"video_delivery\":{\"available\":false,\"scope\":\"whole-session\"},\n");
     const auto &life = state.lifecycle;
     ok = ok &&
          report_append(
@@ -2183,6 +2232,13 @@ static bool prepare_stream_decoder(native_renderer_state_t *state, PDECODE_UNIT 
             const auto parsed = parse_sps(codec, data, entry->length, r);
             if (parsed == ParseResult::Unsupported && unit->frameType != FRAME_TYPE_IDR)
             {
+                if (state->policy_keyframe_wait)
+                {
+                    if (state->stream_policy.pending_depth)
+                        state->stream_policy.reject();
+                    state->policy_keyframe_wait = false;
+                    state->transition_wait_since = 0;
+                }
                 if (!state->transition_wait_since)
                 {
                     state->transition_wait_since = monotonic_us();
@@ -2248,6 +2304,23 @@ static bool prepare_stream_decoder(native_renderer_state_t *state, PDECODE_UNIT 
         sets.supplied_sps = supplied[selected->parameter_id] == selected->identity;
         sets.supplied_pps = supplied_pps[sets.selected_pps] == sets.pps_identity[sets.selected_pps];
     }
+    // A policy refresh retains a usable native owner. A genuinely changed
+    // picture configuration supersedes that optional wait and gets its own bound.
+    if (state->policy_keyframe_wait &&
+        (activation || state->decoder_needs_reset || !state->decoder))
+    {
+        if (state->stream_policy.pending_depth)
+            state->stream_policy.reject();
+        state->policy_keyframe_wait = false;
+        state->await_keyframe = true;
+        state->transition_wait_since = monotonic_us();
+    }
+    const bool verified_continuation = selected && !unknown && !conflict && state->decoder &&
+                                       !activation && !state->decoder_needs_reset &&
+                                       state->lifecycle.state == State::Ready;
+    if (verified_continuation && state->policy_keyframe_wait &&
+        (!safe_idr || unit->frameType != FRAME_TYPE_IDR))
+        return true; // Optional IDR request does not stop valid old-instance pictures.
     bool optional_transition = state->stream_policy.pending_depth != 0;
     const bool retained_idr = selected && state->decoder && state->policy_keyframe_wait &&
                               !state->decoder_needs_reset && !activation && safe_idr &&
@@ -2266,6 +2339,16 @@ static bool prepare_stream_decoder(native_renderer_state_t *state, PDECODE_UNIT 
         (complete_required && (!safe_idr || unit->frameType != FRAME_TYPE_IDR ||
                                (fresh_required && (!sets.supplied_sps || !sets.supplied_pps)))))
     {
+        // Unknown/conflicting pictures cannot be treated as usable optional
+        // continuation. Keep their mandatory resolution bound until an exact
+        // old-instance continuation or a complete safe bootstrap proves safety.
+        if (state->policy_keyframe_wait)
+        {
+            if (state->stream_policy.pending_depth)
+                state->stream_policy.reject();
+            state->policy_keyframe_wait = false;
+            state->transition_wait_since = 0;
+        }
         if (!state->transition_wait_since)
         {
             state->transition_wait_since = monotonic_us();
@@ -2275,11 +2358,12 @@ static bool prepare_stream_decoder(native_renderer_state_t *state, PDECODE_UNIT 
     }
     if (!complete_required)
     {
-        if (safe_idr && unit->frameType == FRAME_TYPE_IDR)
-        {
-            state->transition_wait_since = 0;
-            state->parameters_requested = false;
-        }
+        // selected is the verified, actually submitted SPS/PPS generation and
+        // no reset/recreation/keyframe operation remains. A prior rejected AU
+        // must not leave a fatal deadline armed until an unrelated future IDR.
+        state->transition_wait_since = 0;
+        state->parameters_requested = false;
+        state->policy_keyframe_wait = false;
         return true;
     }
     Limits limits{};
@@ -2336,11 +2420,24 @@ static bool prepare_stream_decoder(native_renderer_state_t *state, PDECODE_UNIT 
     }
     state->transition_wait_since = 0;
     state->parameters_requested = false;
+    state->policy_keyframe_wait = false;
     return true;
 }
 
 static bool decoder_deadline(native_renderer_state_t *state, uint64_t now)
 {
+    if (state->policy_keyframe_wait && !state->await_keyframe && state->decoder &&
+        !state->decoder_needs_reset && state->lifecycle.state == moonlight::video::State::Ready &&
+        state->transition_wait_since && now >= state->transition_wait_since &&
+        now - state->transition_wait_since >= moonlight::video::Lifecycle::startup_timeout_us)
+    {
+        if (state->stream_policy.pending_depth)
+            state->stream_policy.reject();
+        state->policy_keyframe_wait = false;
+        state->await_keyframe = false;
+        state->transition_wait_since = 0;
+        state->parameters_requested = false;
+    }
     if (state->lifecycle.expired(now) ||
         (state->transition_wait_since && now >= state->transition_wait_since &&
          now - state->transition_wait_since >= moonlight::video::Lifecycle::startup_timeout_us))
@@ -2948,7 +3045,9 @@ static void observe_pipeline(native_renderer_state_t *state, uint64_t now)
     if (action == moonlight::video::PolicyAction::None)
         return;
     state->policy_keyframe_wait = true;
-    state->await_keyframe = true;
+    // The old native owner remains valid while an optional IDR is outstanding.
+    // Mandatory native recovery sets await_keyframe independently.
+    state->await_keyframe = false;
     state->parameters_requested = true;
     state->transition_wait_since = now;
     ++state->decoder_refreshes;
@@ -5391,6 +5490,7 @@ configure_stream:
         renderer.main_placement_result = ps5_thread_affinity_set(renderer.layout.other);
         main_mask_changed = renderer.main_placement_result == 0;
     }
+    renderer.delivery_session_floor_us = PltGetMicroseconds();
     connection_result = LiStartConnection(
         &gs_server.server_info, &stream_config, &moonlight_connection_callbacks,
 #if PROSPEROLIGHT_PYROWAVE
